@@ -1,0 +1,322 @@
+\documentclass[12pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{amsmath, amssymb}
+\usepackage{enumitem}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+\usepackage{titlesec}
+\usepackage{subcaption}
+\usepackage{multirow}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue
+}
+
+% --- Metadata Macros ---
+\newcommand{\university}{Politecnico di Torino}
+\newcommand{\degree}{Master's degree in Computer Science Engineering}
+\newcommand{\academicyear}{2025/2026}
+\newcommand{\course}{Technologies for Autonomous Vehicles}
+\newcommand{\reporttitle}{Global Path Planning}
+\newcommand{\reportdate}{\today}
+\newcommand{\student}[2]{#1 -- #2\\}
+
+% --- Title Page ---
+\begin{document}
+\begin{titlepage}
+  \centering
+  \vspace*{1cm}
+  \includegraphics[width=0.35\textwidth]{img/logo_poli.png}\par
+  \vspace{1cm}
+  {\LARGE \textbf{\university}\par}
+  \vspace{0.3cm}
+  {\Large \degree\par}
+  \vspace{0.6cm}
+  {\Large \academicyear\par}
+  \vspace{0.8cm}
+  {\LARGE \textbf{\course}\par}
+  \vspace{0.8cm}
+  {\LARGE \textbf{\reporttitle}\par}
+  \vfill
+  {\large \reportdate \par}
+  \vspace{0.2cm}
+  {\large
+  \student{Jacopo Rialti}{S346357}
+  }
+  \vspace*{0.5cm}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Introduction}
+% =============================================================================
+
+This report presents an experimental comparison between \textbf{Dijkstra's algorithm} and the \textbf{A* search algorithm} equipped with three different heuristic functions: Manhattan distance, Euclidean distance, and Haversine distance. The goal is to evaluate how each algorithm performs on real-world road networks of different sizes, measuring the number of iterations required to find a shortest path.
+
+Two cities were selected for the analysis:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Aosta} -- a small city (815 nodes, 1706 edges), used as a lightweight baseline.
+  \item \textbf{Turin} -- a large metropolitan area (76\,282 nodes, 166\,674 edges), used to stress-test the algorithms.
+\end{itemize}
+
+Road networks were downloaded from OpenStreetMap via the \texttt{osmnx} Python library. Each edge's weight was set to its \emph{travel time}, computed as $w = \text{length} / (\text{maxspeed} / 3.6)$, where maxspeed is converted from km/h to m/s, making the search optimise for the fastest route rather than the shortest distance.
+
+
+% =============================================================================
+\section{Algorithm Descriptions}
+% =============================================================================
+
+\subsection{Dijkstra's Algorithm}
+
+Dijkstra's algorithm explores nodes in order of increasing accumulated cost $g(n)$ from the source. It uses a min-heap priority queue where each entry has priority equal to $g(n)$. Since it does not use any heuristic information about the goal, it expands in all directions uniformly, effectively ``flooding'' outward from the origin.
+
+\subsection{A* Algorithm}
+
+A* extends Dijkstra by adding a heuristic estimate $h(n)$ of the remaining cost to the destination.  The priority of each node becomes:
+\[
+  f(n) = g(n) + \frac{h(n)}{v_{\max}}
+\]
+where $g(n)$ is the accumulated cost, $h(n)$ is the heuristic distance estimate, and $v_{\max}$ is the maximum speed in the graph (in m/s). The division by $v_{\max}$ is critical for \textbf{unit normalisation}: edge weights represent travel time in seconds (length in metres divided by speed in m/s), while heuristic functions return distances in metres. Without this normalisation, the heuristic would either dominate (Haversine) or be negligible (Manhattan/Euclidean in raw degrees).
+
+
+% =============================================================================
+\section{Heuristic Functions}
+% =============================================================================
+
+All three heuristic functions estimate the distance between a node $n$ and the destination. The calculations handle geographic coordinates (latitude and longitude) differently.
+
+\subsection{Manhattan Distance}
+As defined in the assignment specifications, the raw Manhattan distance is computed as:
+\[
+  h(n) = |x_1 - x_2| + |y_1 - y_2|
+\]
+where $x$ and $y$ correspond to the longitude and latitude coordinates in degrees. This formulation measures ``block-wise'' distance on a generic grid.
+
+\subsection{Euclidean Distance}
+The raw Euclidean distance is computed using the Pythagorean theorem directly on the geographic coordinates:
+\[
+  h(n) = \sqrt{(x_1 - x_2)^2 + (y_1 - y_2)^2}
+\]
+Since the shortest path between two points on a flat plane is a straight line, this represents standard point-to-point geometric distance.
+
+\subsection{Haversine Distance}
+The Haversine distance correctly accounts for the spherical shape of the Earth and computes the great-circle distance. Given coordinates in radians ($\phi$ for latitude, $\lambda$ for longitude):
+\[
+  a = \sin^2\!\left(\frac{\Delta\phi}{2}\right) + \cos(\phi_1) \cos(\phi_2) \sin^2\!\left(\frac{\Delta\lambda}{2}\right)
+\]
+\[
+  h(n) = 2R\,\text{atan2}(\sqrt a, \sqrt{1-a})
+\]
+where $R = 6371$~km is the Earth's radius. As this function inherently applies an Earth-radius scale factor, its native output is an actual distance metric (kilometres/metres) rather than raw degrees.
+
+
+% =============================================================================
+\section{Normalisation of Heuristics}
+\label{sec:normalisation}
+% =============================================================================
+
+A key challenge encountered during implementation was the \textbf{unit mismatch} between edge weights and heuristic values. Edge weights are computed as:
+\[
+  w = \frac{\text{length (m)}}{\text{maxspeed (m/s)}}
+\]
+where maxspeed is converted from km/h to m/s by dividing by 3.6. This yields travel time in seconds.
+
+Without normalisation, the three heuristics produce values in very different ranges:
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  \textbf{Heuristic} & \textbf{Raw output} & \textbf{Magnitude} \\
+  \midrule
+  Manhattan / Euclidean (raw degrees) & degrees & $\sim$0.01--0.1 \\
+  Haversine & metres & $\sim$1\,000--10\,000 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+When running A* with raw degrees, coordinate differences ($\sim 0.01 - 0.1$) are microscopically small compared to edge weights. Consequently, the heuristic $h(n)$ becomes virtually negligible compared to the path cost $g(n)$. This lack of authoritative prioritization causes A* to degrade into a standard Dijkstra's algorithm (a blind flood-fill), as confirmed by identical iteration counts in the ``Degrees'' results. Conversely, raw Haversine in metres massively overestimates temporal costs.
+
+To solve this unit mismatch, two fundamental steps are required:
+\begin{enumerate}
+  \item \textbf{Convert coordinates to metres}: Use standard Earth radius approximations. While the latitude conversion is a roughly constant factor ($\approx 111\,320$ m/deg), the longitude conversion strictly requires a cosine correction factor based on the average latitude ($\Delta x \cdot 111\,320 \cdot \cos(\text{lat})$) to account for the Earth's spherical shape and avoid geometric distortion.
+  \item \textbf{Divide by $v_{\max}$}: Normalise the distance by the graph's maximum velocity to match the time-based edge weights, yielding $f(n) = g(n) + \frac{h(n)}{v_{\max}}$, where $h(n)$ is the computed distance in metres.
+\end{enumerate}
+
+
+% =============================================================================
+\section{Experimental Setup}
+% =============================================================================
+
+For each city, the experiment proceeds as follows:
+\begin{enumerate}
+  \item Load the road network from OpenStreetMap and extract the \textbf{largest strongly connected component}, ensuring all selected node pairs are mutually reachable.
+  \item Clean edge attributes (\texttt{maxspeed}), handling missing values, lists, and string formats.  Default speed: 40~km/h.
+  \item Compute edge weights as $w = \text{length} / (\text{maxspeed} / 3.6)$, yielding travel time in seconds.
+  \item Select \textbf{10 random origin--destination pairs} (with start $\neq$ end).
+  \item Run all four algorithms (\textbf{Dijkstra}, \textbf{A* Manhattan}, \textbf{A* Euclidean}, \textbf{A* Haversine}) on the \textbf{same 10 pairs}, recording the number of iterations.
+\end{enumerate}
+
+Using identical pairs across all algorithms is essential for a fair comparison: it eliminates the randomness that would arise from different pairs having different path lengths.
+
+
+% =============================================================================
+\section{Results}
+% =============================================================================
+
+\subsection{Aosta (815 nodes, 1\,706 edges)}
+
+\begin{table}[H]
+\centering
+\caption{Iterations per run -- Aosta}
+\label{tab:aosta}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{r r r r r r r}
+  \toprule
+  \textbf{Run} & \textbf{Dijkstra} & \textbf{A* Man (Meters)} & \textbf{A* Euc (Meters)} & \textbf{A* Hav (Meters)} & \textbf{A* Man (Degrees)} & \textbf{A* Euc (Degrees)} \\
+  \midrule
+  1  & 155 & 50  & 62  & 62  & 155 & 155 \\
+  2  & 542 & 204 & 219 & 219 & 542 & 542 \\
+  3  & 334 & 30  & 46  & 46  & 334 & 334 \\
+  4  & 569 & 185 & 235 & 236 & 569 & 569 \\
+  5  & 107 & 31  & 42  & 42  & 107 & 107 \\
+  6  & 406 & 47  & 65  & 65  & 406 & 406 \\
+  7  & 585 & 282 & 310 & 311 & 585 & 585 \\
+  8  & 783 & 756 & 766 & 766 & 783 & 783 \\
+  9  & 8   & 3   & 4   & 4   & 8   & 8   \\
+  10 & 493 & 189 & 192 & 192 & 493 & 493 \\
+  \midrule
+  \textbf{Mean} & \textbf{398.2} & \textbf{177.7} & \textbf{194.1} & \textbf{194.3} & \textbf{398.2} & \textbf{398.2} \\
+  \bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+\subsection{Turin (76\,282 nodes, 166\,674 edges)}
+
+\begin{table}[H]
+\centering
+\caption{Iterations per run -- Turin}
+\label{tab:turin}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{r r r r r r r}
+  \toprule
+  \textbf{Run} & \textbf{Dijkstra} & \textbf{A* Man (Meters)} & \textbf{A* Euc (Meters)} & \textbf{A* Hav (Meters)} & \textbf{A* Man (Degrees)} & \textbf{A* Euc (Degrees)} \\
+  \midrule
+  1  & 31\,388 & 20\,600 & 22\,883 & 22\,893 & 31\,388 & 31\,388 \\
+  2  & 3\,070  & 1\,965  & 2\,072  & 2\,074  & 3\,070  & 3\,070  \\
+  3  & 23\,728 & 4\,648  & 8\,353  & 8\,366  & 23\,728 & 23\,728 \\
+  4  & 62\,235 & 33\,095 & 38\,040 & 38\,060 & 62\,235 & 62\,235 \\
+  5  & 41\,720 & 19\,946 & 24\,064 & 24\,081 & 41\,719 & 41\,719 \\
+  6  & 6\,749  & 2\,263  & 2\,823  & 2\,824  & 6\,749  & 6\,749  \\
+  7  & 64\,891 & 34\,641 & 42\,713 & 42\,748 & 64\,891 & 64\,891 \\
+  8  & 75\,218 & 61\,989 & 67\,069 & 67\,089 & 75\,218 & 75\,218 \\
+  9  & 40\,287 & 22\,359 & 25\,411 & 25\,418 & 40\,287 & 40\,287 \\
+  10 & 68\,240 & 40\,665 & 46\,109 & 46\,138 & 68\,240 & 68\,240 \\
+  \midrule
+  \textbf{Mean} & \textbf{41\,752.6} & \textbf{24\,217.1} & \textbf{27\,953.7} & \textbf{27\,969.1} & \textbf{41\,752.5} & \textbf{41\,752.5} \\
+  \bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+\subsection{Improvement Summary}
+
+\begin{table}[H]
+\centering
+\caption{Percentage reduction in iterations compared to Dijkstra (Metres limits)}
+\label{tab:improvement}
+\begin{tabular}{l c c}
+  \toprule
+  \textbf{Algorithm} & \textbf{Aosta} & \textbf{Turin} \\
+  \midrule
+  A* Manhattan (Meters)  & $-55.4\%$ & $-42.0\%$ \\
+  A* Euclidean (Meters)  & $-51.3\%$ & $-33.0\%$ \\
+  A* Haversine (Meters)  & $-51.2\%$ & $-33.0\%$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\small\textit{Note: The percentage reduction for the variations using pure degrees (A* Manhattan (Degrees) and A* Euclidean (Degrees)) is \textbf{0\%}, as unnormalised heuristic values are negligible relative to accumulative cost, causing A* to behave exactly as Dijkstra.}
+
+
+\subsection{Expansion Visualisation}
+
+The following figures show the algorithm expansion for a single origin--destination pair. Grey edges are unvisited, green edges have been explored, red edges are on the active frontier, and the white path is the final shortest route.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/aosta_aosta_italy_Dijkstra.png}
+    \caption{Dijkstra}
+  \end{subfigure}\hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/aosta_aosta_italy_Astar_Manhattan_Metri.png}
+    \caption{A* Manhattan}
+  \end{subfigure}\\[0.2cm]
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/aosta_aosta_italy_Astar_Euclidean_Metri.png}
+    \caption{A* Euclidean}
+  \end{subfigure}\hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/aosta_aosta_italy_Astar_Haversine_Metri.png}
+    \caption{A* Haversine}
+  \end{subfigure}
+  \caption{Expansion comparison -- Aosta}
+  \label{fig:aosta}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/turin_piedmont_italy_Dijkstra.png}
+    \caption{Dijkstra}
+  \end{subfigure}\hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/turin_piedmont_italy_Astar_Manhattan_Metri.png}
+    \caption{A* Manhattan}
+  \end{subfigure}\\[0.2cm]
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/turin_piedmont_italy_Astar_Euclidean_Metri.png}
+    \caption{A* Euclidean}
+  \end{subfigure}\hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \includegraphics[width=\textwidth]{../results/img/turin_piedmont_italy_Astar_Haversine_Metri.png}
+    \caption{A* Haversine}
+  \end{subfigure}
+  \caption{Expansion comparison -- Turin}
+  \label{fig:turin}
+\end{figure}
+
+
+% =============================================================================
+\section{Discussion and Conclusions}
+% =============================================================================
+
+Key insights drawn from the experimental results include:
+
+\begin{enumerate}
+  \item \textbf{A* Outperforms Dijkstra}: By leveraging heuristic guidance, A* reduces node expansions by $33 - 55\%$. While Dijkstra searches uniformly in a circular pattern, A* directs its search efficiently towards the destination.
+  
+  \item \textbf{Scalability}: Despite Turin being $\approx 94\times$ larger than Aosta, the relative computational improvement of A* over Dijkstra remains stable, demonstrating its robustness regardless of graph scale.
+
+  \item \textbf{Unit Normalisation is Critical}: Exposing A* to raw degrees ($h(n) \approx 0$) renders the heuristic term powerless, regressing it into a Dijkstra flood-fill (as proven by the 0\% improvement). Normalising by converting to metres and configuring for time ($ / v_{\max}$) is strictly imperative for valid mathematical operations.
+
+  \item \textbf{Admissibility vs. Performance Trade-off}: The implementations divided the heuristic by the absolute maximum speed in the graph, as required to maintain strict \textbf{admissibility}. Since this represents a lower bound on travel time, the heuristic becomes \textit{conservative} in a predominantly urban context (where real speeds are much lower), reducing iterations by only $\approx 1.5\times - 2\times$. To achieve a much faster convergence (e.g., $5\times - 7\times$ reduction, as is often desired in routing engines), the heuristic distance must be divided by an \textit{average urban speed} (e.g., $40 - 50$ km/h). This choice makes the search extremely directional (``greedy'') and collapses the iteration count, but formally sacrifices admissibility, risking suboptimal paths if the true shortest route relies heavily on a high-speed highway segment. Manhattan provides the highest iteration reduction inherently due to its geometric overestimation, but also formally breaks admissibility. Euclidean and Haversine, representing possible straight-line paths, guarantee optimality only when correctly bounded by $v_{\max}$.
+
+  \item \textbf{Euclidean vs Haversine at Urban Scale}: Both metrics yield virtually identical results. At the scale of single cities, Earth's curvature introduces negligible trigonometric error, making the simpler Euclidean approach perfectly sufficient compared to the heavier Haversine formula.
+\end{enumerate}
+
+\end{document}

@@ -1,0 +1,41 @@
+# --- Dataset e Archivi Pesanti ---
+archive/
+PandaSetSensorData/
+*.jpg
+*.png
+*.mp4
+
+# --- Python Environment ---
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Machine Learning / YOLO ---
+*.pt
+*.onnx
+runs/
+yolov8n.pt
+
+# --- IDE e OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+gemini.md
+
+implementationPlan.md
+gold_paper.pdf
+
+*.zip
+
+cache/
+
+__pycache__/
+
+results/
+
+
