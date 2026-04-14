@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2025.12.22)  14 APR 2026 18:26
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2025.12.22)  14 APR 2026 18:35
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -523,33 +523,33 @@ LaTeX Font Info:    External font `lmex10' loaded for size
  [1
 
 {C:/Users/39393/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ec.enc}]
-LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 85.
+LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 81.
  (C:\Users\39393\AppData\Local\Programs\MiKTeX\tex/latex/lm\t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 ) [2{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-rm.enc}{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathsy.enc}{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathit.enc}] [3{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathex.enc}] [4]
-LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 251.
+LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 247.
  (C:\Users\39393\AppData\Local\Programs\MiKTeX\tex/latex/lm\ts1lmr.fd
 File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 ) [5{C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ts1.enc}]
 <Img/44_dashed_noObj.png, id=145, 2249.40375pt x 1371.62437pt>
 File: Img/44_dashed_noObj.png Graphic file (type png)
 <use Img/44_dashed_noObj.png>
-Package pdftex.def Info: Img/44_dashed_noObj.png  used on input line 318.
+Package pdftex.def Info: Img/44_dashed_noObj.png  used on input line 314.
 (pdftex.def)             Requested size: 455.24411pt x 277.58498pt.
  [6]
 <Img/23_dashedContinuos_noObj.png, id=161, 899.61093pt x 549.55313pt>
 File: Img/23_dashedContinuos_noObj.png Graphic file (type png)
 <use Img/23_dashedContinuos_noObj.png>
-Package pdftex.def Info: Img/23_dashedContinuos_noObj.png  used on input line 327.
+Package pdftex.def Info: Img/23_dashedContinuos_noObj.png  used on input line 323.
 (pdftex.def)             Requested size: 455.24411pt x 278.09654pt.
  [7 <./Img/44_dashed_noObj.png> <./Img/23_dashedContinuos_noObj.png>]
 <Img/30_noLanes_PersonCar.png, id=172, 902.6222pt x 547.2947pt>
 File: Img/30_noLanes_PersonCar.png Graphic file (type png)
 <use Img/30_noLanes_PersonCar.png>
-Package pdftex.def Info: Img/30_noLanes_PersonCar.png  used on input line 336.
+Package pdftex.def Info: Img/30_noLanes_PersonCar.png  used on input line 332.
 (pdftex.def)             Requested size: 455.24411pt x 276.03506pt.
 
-Overfull \hbox (9.57849pt too wide) in paragraph at lines 350--351
+Overfull \hbox (9.57849pt too wide) in paragraph at lines 346--347
 \T1/lmr/m/n/10.95 com-puted Look-Up Ta-ble for the IPM. This was re-placed by \T1/lmtt/m/n/10.95 cv2.getPerspectiveTransform
  []
 
@@ -562,15 +562,15 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 189E9C2D08DF50113B061F31253CDA91;3053.
  ) 
 Here is how much of TeX's memory you used:
- 15074 strings out of 474486
- 240681 string characters out of 5743754
- 1939542 words of memory out of 5000000
- 37076 multiletter control sequences out of 15000+600000
- 628800 words of font info for 80 fonts, out of 8000000 for 9000
+ 15070 strings out of 474486
+ 240594 string characters out of 5743754
+ 1937542 words of memory out of 5000000
+ 37072 multiletter control sequences out of 15000+600000
+ 622815 words of font info for 78 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,11n,79p,821b,555s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,11n,79p,731b,555s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmbx10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmbx12.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmex10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmmi10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmmi8.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmr10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmr12.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmr8.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmri10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmsy10.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmsy8.pfb><C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmtt10.pfb>
-Output written on main.pdf (9 pages, 7008111 bytes).
+Output written on main.pdf (9 pages, 7007442 bytes).
 PDF statistics:
  264 PDF objects out of 1000 (max. 8388607)
  60 named destinations out of 1000 (max. 500000)
