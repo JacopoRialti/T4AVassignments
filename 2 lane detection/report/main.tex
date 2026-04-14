@@ -1,0 +1,368 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{listings}
+
+% --- Setup ---
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Assignment 2 - GOLD Lane Detection},
+}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+% --- Title Page Info ---
+\title{
+    \vspace{-2cm}
+    \begin{center}
+        \Large Politecnico di Torino \\
+        \vspace{0.5cm}
+        \Large \textbf{Technologies for Autonomous Vehicles (T4AV)} \\
+        \vspace{1cm}
+        \Huge \textbf{Assignment 2: GOLD Lane Detection}
+        \vspace{1cm}
+    \end{center}
+}
+\author{\textbf{Jacopo Rialti} - s346357}
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report describes the design and implementation of a lane detection pipeline based on the GOLD (Generic Obstacle and Lane Detection) algorithm. The system processes monocular frontal camera images from the PandaSet dataset and produces a Bird's Eye View (BEV) with detected lane delimiters overlaid as green vertical lines. In addition to the mandatory requirements, three optional features were implemented: lane type classification (continuous vs. dashed), lane overlay on the original perspective image, and obstacle detection with distance estimation using a YOLOv8 neural network. The entire pipeline is implemented in Python~3 using OpenCV and NumPy, and runs at interactive frame rates on standard hardware.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Introduction}
+% ============================================================
+
+Lane detection is a fundamental component of Advanced Driver Assistance Systems (ADAS) and autonomous driving stacks. The ability to identify lane boundaries from a monocular camera in real time enables critical functions such as Lane Keeping Assist, Lane Departure Warning, and path planning.
+
+This assignment required the implementation of the GOLD algorithm, which follows a structured pipeline: the road surface captured by a forward-facing camera is first transformed into a Bird's Eye View through Inverse Perspective Mapping (IPM), then processed with specifically designed filters to isolate lane markings, and finally analysed to extract the lane positions. The implemented solution is contained in a single Python script, \texttt{run\_gold.py}, which accepts a glob search path as a command-line argument:
+
+\begin{verbatim}
+python3 run_gold.py 'archive/archive/044/camera/front_camera/*.jpg'
+\end{verbatim}
+
+The camera parameters provided by the assignment are summarised in Table~\ref{tab:camera}.
+
+\begin{table}[H]
+\centering
+\caption{Camera intrinsic and extrinsic parameters.}
+\label{tab:camera}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Image size & $1920 \times 1080$ px \\
+Principal point $(u_0, v_0)$ & $(970, 483)$ px \\
+Focal length $(f_x, f_y)$ & $(1970, 1970)$ px \\
+Camera height $H$ & $1.66$ m \\
+Pitch angle & $0^\circ$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ============================================================
+\section{Pipeline Overview}
+% ============================================================
+
+The pipeline is organised into four sequential stages, each encapsulated in a dedicated function:
+
+\begin{enumerate}
+    \item \textbf{Step A -- IPM Remapping:} The perspective image is warped into a BEV through a homography matrix derived from the camera parameters and a trapezoidal Region of Interest (ROI).
+    \item \textbf{Step B -- Low-Level Processing:} A horizontal brightness transition filter extracts candidate lane pixels, followed by iterative thresholding to produce a clean binary image.
+    \item \textbf{Step C -- Medium-Level Processing:} A column-wise histogram is computed on the binary BEV; peak detection identifies the left and right lane positions.
+    \item \textbf{Step D -- Visualisation:} All results are composed into a four-panel dashboard (Original Perspective, BEV, Binary, Histogram).
+\end{enumerate}
+
+
+% ============================================================
+\section{Methodology}
+% ============================================================
+
+\subsection{Inverse Perspective Mapping (IPM)}
+\label{sec:ipm}
+
+The IPM transformation removes perspective distortion under the \emph{flat-road assumption}: the road surface is modelled as a horizontal plane at height $H = 1.66$\,m below the camera, with zero pitch. Under this assumption, a point $(X, Z)$ on the road plane (where $X$ is the lateral coordinate and $Z$ is the longitudinal distance ahead) projects onto the image plane at:
+
+\begin{equation}
+    u = \frac{f_x \cdot X}{Z} + u_0, \qquad
+    v = \frac{f_y \cdot H}{Z} + v_0
+    \label{eq:projection}
+\end{equation}
+
+A trapezoidal ROI on the road plane is defined by the parameters listed in Table~\ref{tab:roi}. The four corners of this trapezoid are projected onto the image plane using Eq.~\eqref{eq:projection}, producing the source quadrilateral. The destination quadrilateral is simply the rectangle $[0, \texttt{BEV\_W}] \times [0, \texttt{BEV\_H}]$. The $3 \times 3$ homography matrix $\mathbf{M}$ is then computed via \texttt{cv2.getPerspectiveTransform}, and the BEV is obtained as:
+
+\begin{equation}
+    I_{\text{BEV}} = \texttt{warpPerspective}(I_{\text{orig}},\; \mathbf{M},\; (\texttt{BEV\_W}, \texttt{BEV\_H}))
+\end{equation}
+
+The inverse matrix $\mathbf{M}^{-1}$ is also computed at initialisation time to allow mapping BEV coordinates back to the original image (used for the perspective overlay in Optional Requirement~2).
+
+\begin{table}[H]
+\centering
+\caption{ROI and BEV configuration parameters.}
+\label{tab:roi}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Description} \\
+\midrule
+$Z_{\min}$ & 6.0\,m & Near bound (avoids vehicle hood) \\
+$Z_{\max}$ & 25.0\,m & Far bound (limits perspective distortion) \\
+$X_{\min},\; X_{\max}$ & $\pm 2.5$\,m & Lateral extent (5\,m road width) \\
+BEV\_W & 125\,px & Output width ($\approx 25$ px/m) \\
+BEV\_H & 475\,px & Output height ($\approx 25$ px/m) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The BEV resolution was chosen to be approximately isotropic at $\sim$25 pixels per metre, ensuring that lane markings maintain consistent proportions in both the lateral and longitudinal directions. The far bound was deliberately limited to $Z_{\max} = 25$\,m to prevent excessive geometric distortion in the upper portion of the BEV, which would degrade the quality of the subsequent filtering stage.
+
+
+\subsection{Horizontal Brightness Transition Filter}
+\label{sec:filter}
+
+Once the BEV is obtained, the grayscale image is processed by a horizontal brightness transition filter. This filter is specifically designed to detect narrow vertical bright structures, such as lane markings, that are flanked by darker regions on both sides.
+
+For each pixel at position $(x, y)$, two directional differences are computed using a horizontal offset $M = 3$ pixels:
+
+\begin{equation}
+    d^{+}(x,y) = b(x,y) - b(x,y+M), \qquad
+    d^{-}(x,y) = b(x,y) - b(x,y-M)
+    \label{eq:filter}
+\end{equation}
+
+where $b(x,y)$ denotes the grayscale intensity. A pixel is retained only when both differences are strictly positive (indicating a locally bright centre), and the output is set to:
+
+\begin{equation}
+    f(x,y) = 
+    \begin{cases} 
+        d^{+}(x,y) + d^{-}(x,y) & \text{if } d^{+} > 0 \;\text{and}\; d^{-} > 0 \\
+        0 & \text{otherwise}
+    \end{cases}
+    \label{eq:filter_output}
+\end{equation}
+
+The parameter $M = 3$ was chosen to match the expected lane marking width in the BEV (approximately 3--4 pixels at the chosen resolution of 25\,px/m). In the implementation, the shifted images are obtained via NumPy array slicing, avoiding explicit per-pixel loops and ensuring efficient vectorised computation.
+
+
+\subsection{Iterative Thresholding (Binarisation)}
+\label{sec:threshold}
+
+The filtered image is binarised using an iterative method inspired by the Isodata algorithm. Rather than employing a fixed threshold, which would fail under varying illumination conditions, the algorithm computes an optimal threshold by iteratively partitioning the pixel population.
+
+The procedure is as follows:
+
+\begin{enumerate}
+    \item \textbf{Pre-cleaning:} Pixels with intensity below 10 are excluded from the computation. This step prevents the vast majority of near-zero noise pixels from biasing the background mean downward.
+    \item \textbf{Initialisation:} The threshold is initialised at the 75th percentile of the active pixel distribution, rather than at the global mean. This provides faster convergence because lane markings constitute a small, bright minority of the image.
+    \item \textbf{Iteration:} At each step, the active pixels are partitioned into two groups: $A$ (above or equal to $T_h$) and $B$ (below $T_h$). The group means $g_A$ and $g_B$ are computed, and a new threshold is set as:
+    \begin{equation}
+        T_h^{(k+1)} = \frac{g_A + g_B}{2}
+    \end{equation}
+    \item \textbf{Convergence:} The loop terminates when $|T_h^{(k+1)} - T_h^{(k)}| < 1$ gray level, or after a maximum of 30 iterations.
+\end{enumerate}
+
+A global noise floor parameter $\tau = 12$ is implicitly handled by the pre-cleaning step: any residual low-intensity artefacts (e.g., starburst patterns caused by sun reflections on dark asphalt) are already excluded before the thresholding begins.
+
+
+\subsection{Lane Extraction via Histogram Analysis}
+\label{sec:extraction}
+
+The binary BEV image is analysed to determine the horizontal position of the left and right lane delimiters. The procedure involves three key steps:
+
+\begin{enumerate}
+    \item \textbf{Edge cropping:} The leftmost and rightmost 15\% of the image columns are zeroed out. This eliminates false positives caused by the black borders of the IPM warping, where interpolation artefacts can produce spurious bright edges.
+    
+    \item \textbf{Histogram computation:} A column-wise sum is computed over the bottom half of the binary image. This produces a 1-D histogram where peaks correspond to lane positions:
+    \begin{equation}
+        H(x) = \sum_{y = \text{BEV\_H}/2}^{\text{BEV\_H}} \text{binary}(x, y)
+    \end{equation}
+    Only the bottom half is used because lane markings are more reliably detected at closer distances.
+    
+    \item \textbf{Peak detection:} The histogram is split at the midpoint into a left half and a right half, separated by a central blind zone of $\pm 18$ pixels. This blind zone prevents spurious detections from road markings (e.g., text painted on asphalt, arrows) that often appear near the centre of the ego-lane. Within each half, the position of the global maximum is returned as the lane position, provided that the peak value exceeds a confidence threshold of $20 \times 255$.
+\end{enumerate}
+
+
+\subsection{Temporal Memory}
+\label{sec:memory}
+
+Lane detections can be momentarily lost due to occlusion, worn markings, or shadows. To ensure temporal stability and prevent flickering in the output, a simple memory mechanism is implemented. For each lane (left and right), a miss counter tracks the number of consecutive frames in which no detection occurs. If the counter remains below a tolerance of 4 frames, the last known lane position and type are retained. Beyond this threshold, the lane is considered genuinely absent and the memory is cleared.
+
+This approach introduces a maximum latency of 4 frames before a lane disappearance is acknowledged, which is acceptable for the visualisation task at hand.
+
+
+% ============================================================
+\section{Optional Requirements}
+% ============================================================
+
+\subsection{Optional 1: Lane Type Classification}
+\label{sec:classification}
+
+Each detected lane is classified as either \texttt{CONTINUOUS} or \texttt{DASHED} based on its vertical intensity profile within the binary BEV. A narrow strip of $\pm 3$ pixels around the detected lane $x$-coordinate is extracted from the lower half of the BEV (corresponding to approximately 9.5\,m of real road). The strip is projected horizontally to obtain a 1-D binary profile, from which two features are computed:
+
+\begin{itemize}
+    \item \textbf{Fill ratio:} the fraction of rows in the strip that contain at least one active pixel. A continuous line yields a fill ratio close to 1.0; a dashed line yields values in the range $0.3$--$0.5$.
+    \item \textbf{Transition count:} the number of binary transitions (0$\to$1 or 1$\to$0) along the vertical profile. A dashed line produces at least 2 transitions within the 9.5\,m window.
+\end{itemize}
+
+A lane is classified as \texttt{DASHED} if the transition count is $\geq 2$ and the fill ratio is $< 0.65$; otherwise, it is classified as \texttt{CONTINUOUS}. These thresholds were empirically determined on the PandaSet sequences.
+
+
+\subsection{Optional 2: Perspective Overlay}
+\label{sec:overlay}
+
+Lane detections are projected back onto the original perspective image using the inverse homography matrix $\mathbf{M}^{-1}$. For continuous lanes, a single green line is drawn between the top and bottom BEV-to-perspective mapped endpoints. For dashed lanes, the overlay is generated by iterating over each row of the BEV: only rows where the binary image contains active pixels around the lane coordinate are mapped back and drawn as small green circles. This ensures that the dashed pattern on the overlay precisely matches the true road marking pattern, rather than displaying a uniform dashed pattern with arbitrary spacing.
+
+
+\subsection{Optional 3: Obstacle Detection and Distance Estimation}
+\label{sec:obstacle}
+
+Obstacle detection is performed using a pre-trained YOLOv8-nano network (\texttt{yolov8n.pt}) from the Ultralytics library. The model is loaded once at initialisation and runs inference on each original perspective frame, filtered to relevant road classes (person, bicycle, car, motorcycle, bus, truck - COCO classes 0, 1, 2, 3, 5, 7).
+
+For each detected bounding box, the following steps are performed:
+
+\begin{enumerate}
+    \item \textbf{Ground contact point:} The bottom-centre of the bounding box $(u_c, v_b)$ is taken as the approximate contact point between the object and the road surface.
+    
+    \item \textbf{Horizon check:} Detections above the optical horizon ($v_b \leq v_0 + 5$) are discarded, as they would produce mathematically unstable or infinite distance estimates.
+    
+    \item \textbf{BEV projection:} The contact point is transformed into BEV coordinates using the homography matrix $\mathbf{M}$:
+    \begin{equation}
+        \begin{bmatrix} x_{\text{BEV}} \\ y_{\text{BEV}} \end{bmatrix} = \texttt{perspectiveTransform}\left(\begin{bmatrix} u_c \\ v_b \end{bmatrix},\; \mathbf{M}\right)
+    \end{equation}
+    
+    \item \textbf{ROI validation:} Only obstacles whose BEV projection falls within the valid BEV area ($0 \leq x_{\text{BEV}} \leq \texttt{BEV\_W}$ and $0 \leq y_{\text{BEV}} \leq \texttt{BEV\_H}$) are considered.
+    
+    \item \textbf{Distance estimation:} The longitudinal distance is computed by linearly interpolating the $y_{\text{BEV}}$ coordinate between $Z_{\max}$ (top of BEV, $y = 0$) and $Z_{\min}$ (bottom of BEV, $y = \texttt{BEV\_H}$):
+    \begin{equation}
+        Z = Z_{\max} - \frac{y_{\text{BEV}}}{\texttt{BEV\_H}} \cdot (Z_{\max} - Z_{\min})
+        \label{eq:distance}
+    \end{equation}
+\end{enumerate}
+
+Detected obstacles are highlighted with a red bounding box and labelled with the object class and estimated distance on the original image. On the BEV, they are marked with a red dot at the projected ground contact point.
+
+
+% ============================================================
+\section{Visualisation Dashboard}
+% ============================================================
+
+The output is presented as a horizontal four-panel dashboard composed via \texttt{np.hstack}. All panels are normalised to a fixed height of 600 pixels while maintaining their native aspect ratios to ensure a consistent and comparative visualisation.
+
+The four panels are:
+\begin{enumerate}
+    \item \textbf{Original Perspective:} The input image with the ROI trapezoid, lane overlay, lane type labels, YOLO bounding boxes, and ``No lanes found'' message when applicable.
+    \item \textbf{BEV:} The warped bird's-eye view with green lane lines and obstacle ground contact markers.
+    \item \textbf{Binary:} The binarised output of the filter and thresholding stage.
+    \item \textbf{Histogram:} The column-wise histogram of the binary image, providing a visual representation of the lane peak search.
+\end{enumerate}
+
+The frames advance automatically at $\sim$33\,fps (\texttt{cv2.waitKey(30)}), producing a smooth video-like playback of the processed sequence.
+
+
+% ============================================================
+\section{Experimental Results}
+% ============================================================
+
+The algorithm was tested on multiple sequences from the PandaSet dataset. Three representative frames are discussed below.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Img/44_dashed_noObj.png}
+    \caption{Frame from Sequence 044: bilateral dashed lane markings with no obstacles.}
+    \label{fig:seq044}
+\end{figure}
+
+Figure~\ref{fig:seq044} demonstrates the robustness of the classification logic. Both delimiters are identified as \texttt{DASHED} based on their high transition frequency. The point-wise re-projection accurately maps only active BEV pixels back to the perspective view, preserving the visual gaps and aligning the green overlay precisely with the physical paint.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Img/23_dashedContinuos_noObj.png}
+    \caption{Frame from Sequence 023: mixed lane types (dashed left, continuous right).}
+    \label{fig:seq023}
+\end{figure}
+
+Figure~\ref{fig:seq023} validates the system's handling of heterogeneous markings. The classifier successfully discriminates the two types: the solid right lane (high fill ratio) is rendered using linear interpolation, while the dashed left lane uses the data-driven point-wise projection. This dynamic rendering ensures an accurate overlay for both distinct geometries.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{Img/30_noLanes_PersonCar.png}
+    \caption{Frame from Sequence 030: no lanes detected and detection of multiple obstacles.}
+    \label{fig:seq030}
+\end{figure}
+
+Figure~\ref{fig:seq030} illustrates a scenario without lane markings. The system correctly triggers the "No lanes found" warning, avoiding false positives. Simultaneously, YOLOv8 independently detects a pedestrian and a car, calculating their exact distances via the BEV ground contact point projection to maintain reliable situational awareness regardless of lane visibility.
+
+% ============================================================
+\section{Design Choices and Parameters}
+% ============================================================
+
+The following design choices merit discussion:
+
+\begin{itemize}
+    \item \textbf{Homography vs.\ per-pixel LUT:} An earlier version of the pipeline used a manually computed Look-Up Table for the IPM. This was replaced by \texttt{cv2.getPerspectiveTransform} + \texttt{cv2.warpPerspective}, which eliminates interpolation artefacts and produces geometrically correct results with a single matrix multiplication.
+
+    \item \textbf{ROI depth ($Z_{\max} = 25$\,m):} Deeper ROIs (e.g., 50\,m) suffer from severe perspective compression in the upper BEV region, where a single image pixel maps to several metres of road. The 25\,m limit was selected as a compromise between detection range and spatial resolution.
+
+    \item \textbf{YOLOv8-nano:} The nano variant was chosen for its negligible inference latency ($\sim$10\,ms on GPU) while still providing robust detection of vehicles and pedestrians. Since the model ships pre-trained on COCO, no custom training was required.
+
+    \item \textbf{BEV-based distance estimation:} Rather than using the raw pinhole formula $Z = H \cdot f_y / (v - v_0)$, which is sensitive to bounding box localisation errors, the obstacle distance is computed from its BEV $y$-coordinate via linear interpolation (Eq.~\eqref{eq:distance}). This is geometrically equivalent under the flat-road assumption but more numerically stable because the BEV projection smooths the nonlinear perspective mapping.
+\end{itemize}
+
+
+% ============================================================
+\section{Conclusions}
+% ============================================================
+
+This report presented a complete implementation of the GOLD lane detection algorithm, augmented with lane type classification, perspective overlay, and deep learning-based obstacle detection. The system processes PandaSet images at interactive frame rates and produces a comprehensive four-panel dashboard for qualitative evaluation.
+
+The main strengths of the implemented solution are its robustness to varying lighting conditions (thanks to the iterative thresholding), the accurate dashed-line rendering on the perspective view (by leveraging the actual binary pixel positions), and the reliable obstacle detection provided by the YOLOv8 network.
+
+\end{document}

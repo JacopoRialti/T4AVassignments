@@ -8,7 +8,7 @@ class Config:
     """
     Configuration parameters based on the GOLD paper and Assignment 2.
     """
-    # Camera parameters (from Assignment 2)
+    # Camera parameters
     IMAGE_W = 1920
     IMAGE_H = 1080
     U0 = 970
@@ -19,26 +19,27 @@ class Config:
     PITCH = 0.0    # Pitch angle in radians
     
     Z_MIN = 6.0    
-    Z_MAX = 25.0   # Range: 19 metri
+    Z_MAX = 25.0   # Range: 19 metri (da z=6 a z=25)
     X_MIN = -2.5   
-    X_MAX = 2.5    # Range: 5 metri
+    X_MAX = 2.5    # Range: 5 metri (da x=-2.5 a x=2.5)
     
-    # BEV Isotropica (Scala: ~25 pixel/metro)
-    BEV_W = 125    # 5 * 25
-    BEV_H = 475    # 19 * 25
+    # BEV Isotropic
+    BEV_W = 125   
+    BEV_H = 475   
     
-    # Filter parameters (Low-Level Processing)
+    # Filter parameters
     M = 3          # Horizontal pixel distance for lane width filter
     C = 15         # Neighborhood size for adaptive thresholding
     K = 1.5        # Constant for adaptive thresholding
     
-    # Confidence threshold for lane extraction (increased to avoid noise)
+    # Confidence threshold for lane extraction
     LANE_CONFIDENCE = 40 * 255 # Minimum sum of pixels to consider a lane
     
     # Noise floor: global minimal threshold to suppress starburst artifacts on dark asphalt
-    TAU = 12
+    TAU = 12 
 
 
+# IPM: Inverse Perspective Mapping
 def get_perspective_transformation(cfg):
     """Compute the IPM homography from camera parameters and ROI definition."""
     def project_to_image(X, Z):
@@ -67,16 +68,17 @@ def get_perspective_transformation(cfg):
 
     return matrix, inv_matrix, roi_polygon
 
+# Helper to map a BEV pixel back to original perspective image
 def bev_to_persp(x_bev, y_bev, inv_matrix):
     """Helper to map a BEV pixel back to original perspective image"""
     pt = np.array([[[x_bev, y_bev]]], dtype=np.float32)
     res = cv2.perspectiveTransform(pt, inv_matrix)[0][0]
     return int(res[0]), int(res[1])
 
-
+# Horizontal brightness transition filter
 def apply_horizontal_filter(bev_gray, m):
     """
-    Applies the horizontal brightness transition filter (Eq. 5 and 6 from the paper).
+    Applies the horizontal brightness transition filter.
     It extracts vertical bright structures bounded by darker regions.
     """
     img = bev_gray.astype(np.float32)
@@ -100,77 +102,56 @@ def apply_horizontal_filter(bev_gray, m):
     
     return filtered
 
-def prof_threshold(filtered_img):
+# Iterative thresholding
+def prof_threshold(filtered_img, Tau):
     """
-    Calcola la soglia iterativa basata sulle formule del professore,
-    ottimizzata per ignorare il micro-rumore di fondo e gestire i picchi.
+    Iterative thresholding based on the formulas,
+    optimized to ignore background micro-noise and handle peaks.
     """
-    # 1. PRE-PULIZIA: Ignoriamo il rumore di bassissima intensità (es. valori sotto 10).
-    # Questo evita che migliaia di pixel quasi neri distruggano la media g_B.
+    # 1. PRE-CLEANING: Ignore very low intensity noise (e.g., values below 10).
+    # This prevents thousands of almost black pixels from destroying the g_B mean.
     active_pixels = filtered_img[filtered_img > 10]
     
-    # Se l'immagine è completamente buia (es. asfalto vuoto), restituisci nero
+    # If the image is completely dark (e.g., empty asphalt), return black
     if len(active_pixels) == 0:
         return np.zeros_like(filtered_img, dtype=np.uint8)
         
-    # 2. INIZIALIZZAZIONE SMART: Le linee della corsia sono molto luminose ma poche.
-    # Partiamo dal 75° percentile invece che dalla media per una convergenza più rapida e stabile.
+    # 2. SMART INITIALIZATION: Lane lines are very bright but few.
+    # Start from the 75th percentile instead of the mean for faster and more stable convergence.
     Th = np.percentile(active_pixels, 75)
     
-    # Ciclo iterativo per trovare la soglia ottima (Isodata del Prof)
-    for _ in range(30): # Aumentato leggermente il margine di iterazioni
-        # Separa i pixel in due gruppi in base alla soglia attuale
+    # Iterative cycle to find the optimal threshold
+    for _ in range(30): # Slightly increased the iteration margin
+        # Separate pixels into two groups based on the current threshold
         group_A = active_pixels[active_pixels >= Th]
         group_B = active_pixels[active_pixels < Th]
         
-        # 3. SICUREZZA: Calcola g_A e g_B. Se un gruppo è vuoto, usa Th per non sballare la formula.
+        # 3. SAFETY: Calculate g_A and g_B. If a group is empty, use Th to avoid throwing off the formula.
         g_A = np.mean(group_A) if len(group_A) > 0 else Th
         g_B = np.mean(group_B) if len(group_B) > 0 else Th
         
-        # Nuova soglia: la media tra i due gruppi (La formula esatta del Prof)
+        # New threshold: the mean between the two groups
         new_Th = (g_A + g_B) / 2.0
         
-        # Condizione di uscita: se la soglia cambia di meno di 1 livello di grigio, abbiamo finito.
+        # Exit condition: if the threshold changes by less than 1 gray level, we are done.
         if abs(new_Th - Th) < 1.0:
             Th = new_Th
             break
             
         Th = new_Th
         
-    # Applica la soglia finale calcolata per creare l'immagine binaria
+    # 4. NOISE FLOOR: global minimal threshold to suppress starburst artifacts on dark asphalt
+    if Th < Tau:
+        return np.zeros_like(filtered_img, dtype=np.uint8)
+    # Apply the final calculated threshold to create the binary image
     binary = np.zeros_like(filtered_img, dtype=np.uint8)
     binary[filtered_img >= Th] = 255
     
     return binary
 
-def adaptive_threshold(filtered_img, c, k, tau):
-    """
-    Applies adaptive thresholding based on the local neighborhood maximum (Eq. 9)
-    along with a global minimum threshold (TAU) to suppress basic background noise.
-    """
-    # Find local maximum in a C x C neighborhood using dilation
-    kernel = np.ones((c, c), np.uint8)
-    m_xy = cv2.dilate(filtered_img, kernel)
-    
-    # Apply threshold
-    binary = np.zeros_like(filtered_img, dtype=np.uint8)
-    
-    # threshold computation
-    threshold = m_xy / k
-    
-    # A pixel is valid if it beats BOTH the local relative threshold AND the absolute global noise floor
-    binary[(filtered_img > tau) & (filtered_img >= threshold)] = 255
-    
-    # Il filtro morfologico è stato rimosso in quanto erodeva le linee sottili tratteggiate
-    
-    return binary
-
-
-
-
 def extract_lanes(binary_img, cfg):
-    # 1. ELIMINA IL RUMORE AI BORDI: 
-    # I bordi neri dell'IPM creano falsi positivi. Li azzeriamo brutalmente (15% dello schermo a destra e sinistra).
+    # 1. REMOVE NOISE AT THE EDGES: 
+    # The black borders of the IPM create false positives. We zero them out brutally (15% of the screen on the right and left).
     crop_margin = int(binary_img.shape[1] * 0.15)
     binary_img[:, :crop_margin] = 0
     binary_img[:, -crop_margin:] = 0
@@ -178,22 +159,22 @@ def extract_lanes(binary_img, cfg):
     # Generate a column-wise sum (histogram) of the bottom half of the image
     histogram = np.sum(binary_img[binary_img.shape[0]//2:, :], axis=0)
     
-    # 2. MARGINE DINAMICO: Allarghiamo la "zona cieca" centrale per saltare le scritte sull'asfalto
+    # 2. DYNAMIC MARGIN: We widen the central "blind zone" to skip the writings on the asphalt
     midpoint = binary_img.shape[1] // 2
-    search_offset = 18  # Ignoriamo la zona centrale
+    search_offset = 18  # Ignore the central zone
     
     left_lane_x = None
     right_lane_x = None
     
-    # --- Cerchiamo la linea di sinistra (dalla zona pulita fino al centro) ---
+    # --- Search for the left lane (from the clean zone to the center) ---
     left_hist = histogram[:midpoint - search_offset]
     if len(left_hist) > 0:
         max_val_left = np.max(left_hist)
-        # Abbassiamo leggermente la confidence per essere sicuri di prenderla
+        # Lower the confidence slightly to be sure to get it
         if max_val_left > (20 * 255): 
             left_lane_x = np.argmax(left_hist)
             
-    # --- Cerchiamo la linea di destra (dal centro fino alla zona pulita) ---
+    # --- Search for the right lane (from the center to the clean zone) ---
     right_hist = histogram[midpoint + search_offset:]
     if len(right_hist) > 0:
         max_val_right = np.max(right_hist)
@@ -203,6 +184,7 @@ def extract_lanes(binary_img, cfg):
     return left_lane_x, right_lane_x
 
 
+# Draw histogram
 def draw_histogram(binary_img, cfg):
     """
     Creates a visual representation of the lane detection histogram.
@@ -224,6 +206,7 @@ def draw_histogram(binary_img, cfg):
     
     return hist_img
 
+# Optional 1: Lane Type Classification
 def classify_lanes(binary_img, left_x, right_x):
     """
     Optional 1: Lane Type Classification.
@@ -237,7 +220,7 @@ def classify_lanes(binary_img, left_x, right_x):
         start_x = max(0, x - 3)
         end_x = min(binary_img.shape[1], x + 4)
         
-        # Analizziamo la metà inferiore della BEV (circa 9.5 metri di strada reale)
+        # Analyze the lower half of the BEV (about 9.5 meters of real road)
         lane_strip = binary_img[binary_img.shape[0]//2:, start_x:end_x]
         
         # Flatten horizontally
@@ -247,10 +230,10 @@ def classify_lanes(binary_img, left_x, right_x):
         fill_ratio = np.sum(profile) / len(profile)
         transitions = np.sum(profile[:-1] != profile[1:])
         
-        # NUOVA LOGICA: 
-        # - Nello spazio di 9.5m, potremmo vedere solo 1 interruzione (2 o 3 transizioni).
-        # - Il fill_ratio di una linea tratteggiata reale sarà intorno allo 0.3 - 0.5. 
-        #   Se è < 0.85 consideriamo che ci siano buchi evidenti.
+        # Logic: 
+        # - In 9.5m, we might see only 1 interruption (2 or 3 transitions).
+        # - The fill_ratio of a dashed line will be around 0.3 - 0.5. 
+        #   If it's < 0.85 we consider that there are evident holes.
         if transitions >= 2 and fill_ratio < 0.65:
             return "DASHED"
         else:
@@ -258,36 +241,7 @@ def classify_lanes(binary_img, left_x, right_x):
 
     return classify_single(left_x), classify_single(right_x)
 
-
-def detect_obstacle(binary_img, lanes_x, cfg):
-    """
-    Optional 3: Monocular Obstacle Detection & Distance Estimation.
-    Scans the ego-lane for anomalous blobs representing obstacles (e.g. vehicles ahead).
-    Returns basic BEV bounding box info (r_bottom, c_center, extents) if found.
-    """
-    # 1. Define ego-lane ROI (Region Of Interest)
-    if len(lanes_x) >= 2:
-        left_bound = lanes_x[0] + 10 # Avoid the lane line itself
-        right_bound = lanes_x[1] - 10
-    elif len(lanes_x) == 1:
-        # If one lane, infer the other assuming typical lane width in BEV (~140px)
-        if lanes_x[0] < binary_img.shape[1] // 2:
-            left_bound = lanes_x[0] + 10
-            right_bound = min(binary_img.shape[1] - 1, left_bound + 140)
-        else:
-            right_bound = lanes_x[0] - 10
-            left_bound = max(0, right_bound - 140)
-    else:
-        # Default ego lane bounds in BEV
-        mid = binary_img.shape[1] // 2
-        left_bound = mid - 60
-        right_bound = mid + 60
-        
-    if right_bound <= left_bound:
-        return None
-        
-    roi_mask = np.zeros_like(binary_img)
-    roi_mask[:, left_bound:right_bound] = 255
+    
 def main():
     # 1. Parse CLI arguments
     if len(sys.argv) != 2:
@@ -304,18 +258,18 @@ def main():
         
     print(f"Found {len(image_paths)} images. Press any key to advance to the next frame. Press 'q' or 'ESC' to quit.")
     
-    # Inizializzazione Multi-Layer: Omografia e Rete Neurale YOLO
+    # Initialization Multi-Layer: Homography and Neural Network YOLO
     cfg = Config()
     perspective_matrix, inv_matrix, roi_polygon = get_perspective_transformation(cfg)
     
-    # Inizializziamo YOLO (Veloce e super leggero, il framework farà auto-download se non presente)
-    print("Inizializzazione YOLOV8 in corso per l'Intelligenza Artificiale (Obstacles)...")
+    # Initialize YOLO (Fast and super light, the framework will auto-download if not present)
+    print("Initializing YOLOV8 in progress for Artificial Intelligence (Obstacles)...")
     from ultralytics import YOLO
     import logging
-    logging.getLogger("ultralytics").setLevel(logging.ERROR) # silenzia output eposito
+    logging.getLogger("ultralytics").setLevel(logging.ERROR) # silence output
     yolo_model = YOLO("yolov8n.pt") 
     
-    # Variabili per la memoria temporale delle corsie (fino a 3 frame di buio)
+    # Variables for the temporal memory of the lanes (up to 3 frames of darkness)
     left_mem_x = None
     left_mem_type = None
     left_miss_cnt = 0
@@ -337,46 +291,46 @@ def main():
         bev_img = cv2.warpPerspective(frame, perspective_matrix, (cfg.BEV_W, cfg.BEV_H))
         bev_gray = cv2.cvtColor(bev_img, cv2.COLOR_BGR2GRAY)
         
-        # Disegniamo il trapezio sull'immagine reale originale usando il footprint calcolato a priori
+        # Draw the trapezoid on the original real image using the footprint calculated a priori
         cv2.polylines(frame, [roi_polygon], isClosed=True, color=(0, 0, 255), thickness=4)
         pt_TL = tuple(roi_polygon[3][0])
         cv2.putText(frame, "ROI", (pt_TL[0] - 50, pt_TL[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
         
         # -- Step B: Low-Level Processing (Parallel Feature Extraction) --
         filtered = apply_horizontal_filter(bev_gray, cfg.M)
-        binary = prof_threshold(filtered)
+        binary = prof_threshold(filtered, cfg.TAU)
         
         # -- Step C: Medium-Level Processing with Memory --
         left_x, right_x = extract_lanes(binary, cfg)
         left_t, right_t = classify_lanes(binary, left_x, right_x)
         
-        # Memory update per linea di Sinistra
+        # Memory update for Left lane
         if left_x is not None:
             left_mem_x = left_x
             left_mem_type = left_t
             left_miss_cnt = 0
         else:
             left_miss_cnt += 1
-            if left_miss_cnt <= 3 and left_mem_x is not None:
+            if left_miss_cnt <= 4 and left_mem_x is not None:
                 left_x = left_mem_x
                 left_t = left_mem_type
             else:
                 left_mem_x = None
                 
-        # Memory update per linea di Destra
+        # Memory update for Right lane
         if right_x is not None:
             right_mem_x = right_x
             right_mem_type = right_t
             right_miss_cnt = 0
         else:
             right_miss_cnt += 1
-            if right_miss_cnt <= 3 and right_mem_x is not None:
+            if right_miss_cnt <= 4 and right_mem_x is not None:
                 right_x = right_mem_x
                 right_t = right_mem_type
             else:
                 right_mem_x = None
                 
-        # Ricomponi liste per visualizzazioni a valle
+        # Recompose lists for downstream visualizations
         lanes_x = []
         lane_types = []
         if left_x is not None:
@@ -390,42 +344,42 @@ def main():
         bev_out = bev_img.copy()
         
         # -- Optional 3: Obstacle Detection & Distance Estimation with YOLO (AI) --
-        # Eseguiamo l'inferenza usando YOLO solo sulle classi Rilevanti in strada (persone, bici, auto, moto, bus, camion)
+        # Perform inference using YOLO only on Relevant classes in the street (people, bikes, cars, motorcycles, buses, trucks)
         results = yolo_model(frame, verbose=False, classes=[0, 1, 2, 3, 5, 7])
         
         for box in results[0].boxes:
-            # Estraiamo geometrie e features dal Bounding Box
+            # Extract geometries and features from the Bounding Box
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             conf = float(box.conf[0])
             cls_id = int(box.cls[0])
             label_name = yolo_model.names[cls_id]
             
-            # Troviamo il punto a contatto col suolo (Base centrale inferiore del bounding box)
+            # Find the contact point with the ground (Lower central base of the bounding box)
             u_center = (x1 + x2) // 2
             v_bottom = y2
             
-            # Se si trova sopra l'Orizzonte prospettico è ininfluente e darebbe asintoto
+            # If it is above the perspective horizon it is irrelevant and would give asymptote
             if v_bottom <= cfg.V0 + 5:
                 continue
                 
-            # Usa l'omografia per mappare (u_center, v_bottom) sulla pianta Bird's Eye
+            # Use homography to map (u_center, v_bottom) to the Bird's Eye view
             pt_to_map = np.array([[[u_center, v_bottom]]], dtype=np.float32)
             bev_pt = cv2.perspectiveTransform(pt_to_map, perspective_matrix)[0][0]
             bev_x, bev_y = int(bev_pt[0]), int(bev_pt[1])
             
-            # Se l'ostacolo cade all'interno della nostra ROI / BEV completa
+            # If the obstacle falls within our complete ROI / BEV
             if 0 <= bev_x <= cfg.BEV_W and 0 <= bev_y <= cfg.BEV_H:
                 
-                # Calcoliamo la distanza Z (metri) in modo lineare nativo,
-                # sfruttando l'asse verticale della nostra Bird's Eye View scalata a terra.
+                # Calculate the distance Z (meters) in a native linear way,
+                # exploiting the vertical axis of our Bird's Eye View scaled to the ground.
                 distance = cfg.Z_MAX - (bev_y / cfg.BEV_H) * (cfg.Z_MAX - cfg.Z_MIN)
                 
-                # --- Disegno su Original Perspective ---
+                # --- Drawing on Original Perspective ---
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
                 label_str = f"[{label_name}] {distance:.1f}m"
                 cv2.putText(frame, label_str, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 
-                # --- Disegno su BEV Pianta (Evidenziando il contatto radiale a terra) ---
+                # --- Drawing on BEV Plan (Highlighting the radial contact on the ground) ---
                 cv2.circle(bev_out, (bev_x, bev_y), 8, (0, 0, 255), -1)
                 cv2.putText(bev_out, f"{distance:.1f}m", (bev_x + 12, bev_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         
@@ -435,7 +389,7 @@ def main():
             cv2.putText(frame, ltype, (u_text + 30, v_text), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 0), 4)
             
             if ltype == "DASHED":
-                # Scansioniamo la riga per segnare 'DASHED' solo dove vi è l'effettivo paint stradale
+                # Scan the row to mark 'DASHED' only where there is the actual road paint
                 for y in range(0, cfg.BEV_H):
                     if np.max(binary[y, max(0, x-2):min(cfg.BEV_W, x+3)]) > 0:
                         u, v = bev_to_persp(x, y, inv_matrix)
@@ -450,57 +404,54 @@ def main():
         
         # -- Step D: Mandatory Visualization (Dashboard Integration) --
         
-        if not lanes_x:
+        if len(lanes_x) == 0:
             text = "No lanes found"
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 1.5
+            font_scale = 1.2
             thickness = 3
             text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
-            
-            text_x_bev = (bev_out.shape[1] - text_size[0]) // 2
-            text_y = bev_out.shape[0] // 2
-            cv2.putText(bev_out, text, (text_x_bev, text_y), font, font_scale, (0, 0, 255), thickness)
+            text_y = frame.shape[0] - 50 
             
             text_x_frame = (frame.shape[1] - text_size[0]) // 2
             cv2.putText(frame, text, (text_x_frame, text_y), font, font_scale, (0, 0, 255), thickness)
                 
-        # Dashboard creation: Layout Orizzontale (Affiancato)
-        dashboard_h = 600 # Fissiamo l'altezza a 600 pixel
+        # Dashboard creation: Horizontal Layout (Side-by-side)
+        dashboard_h = 600 # Fixed height to 600 pixels
         
-        # 1. Original frame (Mantiene proporzioni 16:9)
+        # 1. Original frame (Maintains 16:9 proportions)
         orig_w = int(frame.shape[1] * (dashboard_h / frame.shape[0]))
         frame_resized = cv2.resize(frame, (orig_w, dashboard_h))
         cv2.putText(frame_resized, "Original Perspective", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
         
-        # 2. BEV out (Stretta e lunga)
+        # 2. BEV out (Narrow and long)
         bev_w = int(bev_out.shape[1] * (dashboard_h / bev_out.shape[0]))
         bev_resized = cv2.resize(bev_out, (bev_w, dashboard_h))
         cv2.putText(bev_resized, "BEV", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        # 3. Binary BGR (Stretta e lunga)
+        # 3. Binary BGR (Narrow and long)
         binary_bgr = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
         binary_resized = cv2.resize(binary_bgr, (bev_w, dashboard_h))
         cv2.putText(binary_resized, "Binary", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        # 4. Histogram (Stretta e lunga)
+        # 4. Histogram (Narrow and long)
         hist_img = draw_histogram(binary, cfg)
         hist_resized = cv2.resize(hist_img, (bev_w, dashboard_h))
         
-        # Unisci tutto orizzontalmente in un'unica lunga riga
+        # Join everything horizontally in a single long row
         dashboard = np.hstack((frame_resized, bev_resized, binary_resized, hist_resized))
         
-        # Evita che la finestra venga troncata dal sistema operativo (es. scaling 150% su laptop)
+        # Avoid the window being truncated by the operating system (e.g. 150% scaling on laptop)
         max_screen_width = 1500
         if dashboard.shape[1] > max_screen_width:
             scale = max_screen_width / dashboard.shape[1]
             dashboard = cv2.resize(dashboard, (int(dashboard.shape[1] * scale), int(dashboard.shape[0] * scale)))
         
-        # Mostra dashboard
+        # Show dashboard
         cv2.namedWindow("Dashboard - GOLD Lane Detection", cv2.WINDOW_NORMAL)
         cv2.imshow("Dashboard - GOLD Lane Detection", dashboard)
         
-        # Sostituiamo lo zero (che blocca il frame all'infinito fino al click)
-        # con '30' che scorre fluidamente a ~33 frame al secondo.
+        # Replace zero (which blocks the frame indefinitely until clicked)
+        # with '30' which scrolls smoothly at ~33 frames per second.
         key = cv2.waitKey(30) & 0xFF
         if key == 27 or key == ord('q'):
             break
