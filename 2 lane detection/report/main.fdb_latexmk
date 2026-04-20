@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1776184502.66883 "c:/Users/39393/Desktop/PoliTo/T4AV/Assignments/2 lane detection/report/main.tex" "main.pdf" "main" 1776184504.99391 0
+["pdflatex"] 1776694413.08554 "c:/Users/39393/Desktop/PoliTo/T4AV/Assignments/2 lane detection/report/main.tex" "main.pdf" "main" 1776694419.77861 0
   "C:/Users/39393/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map" 1771069447 96176 40a8022d15c5925d7081b1ad66e03248 ""
   "C:/Users/39393/AppData/Local/MiKTeX/miktex/data/le/pdftex/pdflatex.fmt" 1766411698 24225047 364338e31e558be800bb4747121e0856 ""
   "C:/Users/39393/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ec.enc" 1256929440 2375 baa924870cfb487815765f9094cf3728 ""
@@ -136,11 +136,11 @@
   "Img/23_dashedContinuos_noObj.png" 1776158871 817814 bd0cbc6183fc1b5cfc0de94aabd779bc ""
   "Img/30_noLanes_PersonCar.png" 1776158542 924512 84b521e6f18d62902a1779b2b9ab266f ""
   "Img/44_dashed_noObj.png" 1776158191 3434643 b2275b440b68ea79f2baece92a7c7c60 ""
-  "c:/Users/39393/Desktop/PoliTo/T4AV/Assignments/2 lane detection/report/main.tex" 1776184501 21660 de3101dac3aaf87e431ab29cf4fa35fe ""
-  "main.aux" 1776184504 4898 e772cdc33acd5405a347c27dc8dc40b0 "pdflatex"
-  "main.out" 1776184504 3053 189e9c2d08df50113b061f31253cda91 "pdflatex"
-  "main.tex" 1776184501 21660 de3101dac3aaf87e431ab29cf4fa35fe ""
-  "main.toc" 1776184504 1433 cd6b43b0f42dd29396c1987f6aa98acc "pdflatex"
+  "c:/Users/39393/Desktop/PoliTo/T4AV/Assignments/2 lane detection/report/main.tex" 1776694406 21671 0afd735aa8bc0749a2f6ee39b7018d4a ""
+  "main.aux" 1776694419 4898 e772cdc33acd5405a347c27dc8dc40b0 "pdflatex"
+  "main.out" 1776694419 3053 189e9c2d08df50113b061f31253cda91 "pdflatex"
+  "main.tex" 1776694406 21671 0afd735aa8bc0749a2f6ee39b7018d4a ""
+  "main.toc" 1776694419 1433 cd6b43b0f42dd29396c1987f6aa98acc "pdflatex"
   (generated)
   "main.aux"
   "main.log"
