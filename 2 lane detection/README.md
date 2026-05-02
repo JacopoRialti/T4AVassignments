@@ -2,6 +2,15 @@
 
 This repository contains the implementation of the GOLD Lane Detection pipeline, integrated with YOLOv8 for obstacle detection and distance estimation.
 
+## Submission Contents
+
+The delivery folder contains the following files:
+- `run_gold.py`: The main Python script to execute the lane detection and obstacle recognition pipeline.
+- `README.md`: This documentation file.
+- `requirements.txt`: The list of required Python dependencies to run the code.
+- `report.pdf`: The final report describing the methodology, design choices, and results.
+- `yolov8n.pt`: The pre-trained YOLOv8 nano weights used for obstacle detection, provided to avoid downloads during execution.
+
 ## Prerequisites
 
 Before running the project, you need to install all the required Python libraries. A `requirements.txt` file is provided for your convenience.
