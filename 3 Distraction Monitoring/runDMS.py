@@ -52,7 +52,7 @@ def head_yaw_ratio(landmarks, img_w, img_h):
     return dist_left / (dist_left + dist_right)
 
 def eye_yaw_ratio(landmarks, left_corner, right_corner, iris_center, img_w, img_h):
-    # Use raw x coordinates to estimate horizontal gaze position
+    # Use raw x coordinates to estimate horizontal gaze position (Z is too noisy)
     p_lc_x = landmarks[left_corner].x * img_w
     p_rc_x = landmarks[right_corner].x * img_w
     p_ir_x = landmarks[iris_center].x * img_w
@@ -230,19 +230,28 @@ def main():
             ema_h_yaw = alpha * h_yaw + (1 - alpha) * ema_h_yaw
             ema_eye_yaw = alpha * avg_eye_yaw + (1 - alpha) * ema_eye_yaw
             
-            # Very slow EMA to establish the "neutral" resting position of the eyes
-            baseline_eye_yaw = 0.002 * ema_eye_yaw + 0.998 * baseline_eye_yaw
-
             # 2. Condition Evaluation
             is_head_away = abs(ema_h_yaw - 0.5) > HEAD_YAW_THRESHOLD
+            
+            # STRICT head check for Lizard: Lizard ONLY triggers if the head is almost perfectly centered.
+            # This prevents the 2D eye projection from triggering Lizard when turning the head slightly.
+            STRICT_HEAD_YAW_THRESHOLD = 0.1
+            is_head_strict_center = abs(ema_h_yaw - 0.5) < STRICT_HEAD_YAW_THRESHOLD
+            
+            # Very slow EMA to establish the "neutral" resting position of the eyes
+            # We ONLY update the baseline if the head is strictly centered.
+            # This prevents learning a distorted "owl" eye yaw as the new normal.
+            if is_head_strict_center:
+                baseline_eye_yaw = 0.002 * ema_eye_yaw + 0.998 * baseline_eye_yaw
+
             # Use dynamic baseline instead of hardcoded 0.5
-            is_eyes_away = abs(ema_eye_yaw - baseline_eye_yaw) > IRIS_YAW_THRESHOLD and not is_head_away
+            is_eyes_away = abs(ema_eye_yaw - baseline_eye_yaw) > IRIS_YAW_THRESHOLD and is_head_strict_center
             is_eyes_closed = ema_ear < EAR_THRESHOLD
             
             # Print debug info on screen
-            cv2.putText(image, f"Eye Yaw: {ema_eye_yaw:.3f} (Base: {baseline_eye_yaw:.3f}) Distracted: {is_eyes_away}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-            cv2.putText(image, f"Head Yaw: {ema_h_yaw:.2f} (Distracted: {is_head_away})", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-            cv2.putText(image, f"EAR: {ema_ear:.2f} (Closed: {is_eyes_closed})", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            cv2.putText(image, f"Eye Yaw: {ema_eye_yaw:.3f} (Base: {baseline_eye_yaw:.3f}) Distracted: {is_eyes_away}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(image, f"Head Yaw: {ema_h_yaw:.2f} (Distracted: {is_head_away}, Strict Center: {is_head_strict_center})", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(image, f"EAR: {ema_ear:.2f} (Closed: {is_eyes_closed})", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
             # 8. Draw Landmarks (similar to example)
             for lm_idx in [1, 234, 454, 473, 468, 33, 133, 362, 263]:
@@ -265,16 +274,20 @@ def main():
         if is_head_away:
             head_forward_start = None
         else:
-            last_head_forward_time = curr_time
             if head_forward_start is None:
                 head_forward_start = curr_time
+            # Only reset the timer if the head has been forward for at least 0.5 seconds
+            if curr_time - head_forward_start >= 0.5:
+                last_head_forward_time = curr_time
                 
         if is_eyes_away:
             eyes_forward_start = None
         else:
-            last_eyes_forward_time = curr_time
             if eyes_forward_start is None:
                 eyes_forward_start = curr_time
+            # Only reset the timer if the eyes have been forward for at least 0.5 seconds (prevents noise flickering)
+            if curr_time - eyes_forward_start >= 0.5:
+                last_eyes_forward_time = curr_time
                 
         if is_eyes_closed:
             eyes_open_start = None
@@ -335,10 +348,14 @@ def main():
             driver_state = "Sleep"
         elif state_microsleep:
             driver_state = "Microsleep"
-        elif state_long_owl or state_long_lizard:
-            driver_state = "Distracted (long)"
-        elif state_short_owl or state_short_lizard:
-            driver_state = "Distracted (short)"
+        elif state_long_owl:
+            driver_state = "Distracted Owl (long)"
+        elif state_long_lizard:
+            driver_state = "Distracted Lizard (long)"
+        elif state_short_owl:
+            driver_state = "Distracted Owl (short)"
+        elif state_short_lizard:
+            driver_state = "Distracted Lizard (short)"
         else:
             driver_state = "Focused on the road"
             
