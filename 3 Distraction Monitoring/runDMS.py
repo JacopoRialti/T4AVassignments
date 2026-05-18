@@ -8,9 +8,8 @@ from scipy.signal import butter, filtfilt
 from sklearn.decomposition import FastICA
 from sklearn.exceptions import ConvergenceWarning
 
-# Suppress protobuf deprecation warning caused by mediapipe
+# Filter warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf.symbol_database")
-# Suppress FastICA convergence warning
 warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn.decomposition")
 
 # MediaPipe Initialization
@@ -19,7 +18,7 @@ mp_face_mesh = mp.solutions.face_mesh
 # --- Configurations ---
 EAR_THRESHOLD = 0.20
 HEAD_YAW_THRESHOLD = 0.20  # Ratio difference from 0.5 (i.e., <0.30 or >0.70)
-IRIS_YAW_THRESHOLD = 0.006  # Lowered: iris moves less than head. Difference from 0.5
+IRIS_YAW_THRESHOLD = 0.006  # Lowered: iris moves less than head. Ratio difference from 0.5
 
 # --- Landmark Indices ---
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
@@ -31,14 +30,18 @@ FACE_SILHOUETTE = [
 ]
 
 # --- Helper Functions ---
+
+# Calculate Euclidean distance between two points
 def distance(p1, p2):
     return np.linalg.norm(np.array(p1) - np.array(p2))
 
+# Calculate eye aspect ratio
 def eye_aspect_ratio(landmarks, eye_indices, img_w, img_h):
     p = [np.array([landmarks[i].x * img_w, landmarks[i].y * img_h]) for i in eye_indices]
     ear = (distance(p[1], p[5]) + distance(p[2], p[4])) / (2.0 * distance(p[0], p[3]))
     return ear
 
+# Calculate head yaw ratio
 def head_yaw_ratio(landmarks, img_w, img_h):
     nose = np.array([landmarks[1].x * img_w, landmarks[1].y * img_h])
     left_cheek = np.array([landmarks[234].x * img_w, landmarks[234].y * img_h])
@@ -51,6 +54,7 @@ def head_yaw_ratio(landmarks, img_w, img_h):
         return 0.5
     return dist_left / (dist_left + dist_right)
 
+# Calculate eye yaw ratio
 def eye_yaw_ratio(landmarks, left_corner, right_corner, iris_center, img_w, img_h):
     # Use raw x coordinates to estimate horizontal gaze position (Z is too noisy)
     p_lc_x = landmarks[left_corner].x * img_w
@@ -65,6 +69,7 @@ def eye_yaw_ratio(landmarks, left_corner, right_corner, iris_center, img_w, img_
         return 0.5
     return dist_left / (dist_left + dist_right)
 
+# Get ROI mean RGB
 def get_roi_mean_rgb(image, landmarks, roi_indices, img_w, img_h):
     pts = np.array([(int(landmarks[i].x * img_w), int(landmarks[i].y * img_h)) for i in roi_indices], dtype=np.int32)
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
@@ -72,6 +77,7 @@ def get_roi_mean_rgb(image, landmarks, roi_indices, img_w, img_h):
     mean_val = cv2.mean(image, mask=mask)
     return mean_val[2], mean_val[1], mean_val[0]  # R, G, B
 
+# Estimate heart rate using rPPG
 def estimate_hr_rPPG(buffer_r, buffer_g, buffer_b, fps):
     if len(buffer_g) < 100:
         return 0
@@ -123,6 +129,7 @@ def estimate_hr_rPPG(buffer_r, buffer_g, buffer_b, fps):
     except Exception as e:
         return 0
 
+# Calculate cumulative time
 def calc_cumulative_time(history):
     if len(history) < 2: return 0
     total = 0
@@ -132,6 +139,7 @@ def calc_cumulative_time(history):
     return total
 
 def main():
+    # FaceMesh initialization
     face_mesh = mp_face_mesh.FaceMesh(
         max_num_faces=1,
         refine_landmarks=True,
@@ -139,6 +147,7 @@ def main():
         min_tracking_confidence=0.5
     )
 
+    # Video capture initialization
     cap = cv2.VideoCapture(0)
     
     # State histories
@@ -150,6 +159,7 @@ def main():
     last_eyes_forward_time = time.time()
     last_eyes_open_time = time.time()
     
+    # Start times
     head_forward_start = None
     eyes_forward_start = None
     eyes_open_start = None
@@ -161,7 +171,7 @@ def main():
     state_short_lizard = False
     state_microsleep = False
     state_sleep = False
-    
+
     # rPPG Buffers
     r_buffer = deque(maxlen=300)
     g_buffer = deque(maxlen=300)
@@ -181,43 +191,51 @@ def main():
     
     # Dynamic baseline for eyes (auto-calibration)
     baseline_eye_yaw = 0.5
+    eye_yaw_baseline_history = deque(maxlen=900) # ~30 seconds window for median baseline
 
+    # Main loop
     while cap.isOpened():
         success, image = cap.read()
         if not success:
-            break
-            
+            break # Exit if video capture fails
+
+        # Frame time
         curr_time = time.time()
         fps = 1 / (curr_time - prev_frame_time) if curr_time - prev_frame_time > 0 else 30
         prev_frame_time = curr_time
 
+        # Image processing
         image = cv2.flip(image, 1) # Selfie view
         img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         img_rgb.flags.writeable = False
         results = face_mesh.process(img_rgb)
-        
+
+        # Image size
         img_h, img_w, img_c = image.shape
-        
+
+        # Flags
         is_face_detected = False
         is_head_away = False
         is_eyes_away = False
         is_eyes_closed = False
 
+        # Face detection
         if results.multi_face_landmarks:
             is_face_detected = True
             face_landmarks = results.multi_face_landmarks[0]
-            
-            # 1. Extraction
+
+            # Extraction
             left_ear = eye_aspect_ratio(face_landmarks.landmark, LEFT_EYE, img_w, img_h)
             right_ear = eye_aspect_ratio(face_landmarks.landmark, RIGHT_EYE, img_w, img_h)
             avg_ear = (left_ear + right_ear) / 2.0
-            
+
             h_yaw = head_yaw_ratio(face_landmarks.landmark, img_w, img_h)
-            
+
             l_eye_yaw = eye_yaw_ratio(face_landmarks.landmark, 33, 133, 473, img_w, img_h)
             r_eye_yaw = eye_yaw_ratio(face_landmarks.landmark, 362, 263, 468, img_w, img_h)
             avg_eye_yaw = (l_eye_yaw + r_eye_yaw) / 2.0
-            
+
+            # Extract RGB values from the face silhouette ROI for rPPG
             r, g, b_val = get_roi_mean_rgb(image, face_landmarks.landmark, FACE_SILHOUETTE, img_w, img_h)
             r_buffer.append(r)
             g_buffer.append(g)
@@ -230,17 +248,14 @@ def main():
             ema_h_yaw = alpha * h_yaw + (1 - alpha) * ema_h_yaw
             ema_eye_yaw = alpha * avg_eye_yaw + (1 - alpha) * ema_eye_yaw
             
-            # 2. Condition Evaluation
+            # Condition Evaluation
             is_head_away = abs(ema_h_yaw - 0.5) > HEAD_YAW_THRESHOLD
             
-            # STRICT head check for Lizard: Lizard ONLY triggers if the head is almost perfectly centered.
-            # This prevents the 2D eye projection from triggering Lizard when turning the head slightly.
+            # Strict head check for Lizard: Lizard ONLY triggers if the head is almost perfectly centered.
             STRICT_HEAD_YAW_THRESHOLD = 0.1
             is_head_strict_center = abs(ema_h_yaw - 0.5) < STRICT_HEAD_YAW_THRESHOLD
             
             # Very slow EMA to establish the "neutral" resting position of the eyes
-            # We ONLY update the baseline if the head is strictly centered.
-            # This prevents learning a distorted "owl" eye yaw as the new normal.
             if is_head_strict_center:
                 baseline_eye_yaw = 0.002 * ema_eye_yaw + 0.998 * baseline_eye_yaw
 
@@ -248,29 +263,31 @@ def main():
             is_eyes_away = abs(ema_eye_yaw - baseline_eye_yaw) > IRIS_YAW_THRESHOLD and is_head_strict_center
             is_eyes_closed = ema_ear < EAR_THRESHOLD
             
-            # Print debug info on screen
+            # Display debug info on screen
             cv2.putText(image, f"Eye Yaw: {ema_eye_yaw:.3f} (Base: {baseline_eye_yaw:.3f}) Distracted: {is_eyes_away}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             cv2.putText(image, f"Head Yaw: {ema_h_yaw:.2f} (Distracted: {is_head_away}, Strict Center: {is_head_strict_center})", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             cv2.putText(image, f"EAR: {ema_ear:.2f} (Closed: {is_eyes_closed})", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # 8. Draw Landmarks (similar to example)
+            # Draw Landmarks
             for lm_idx in [1, 234, 454, 473, 468, 33, 133, 362, 263]:
                 lm = face_landmarks.landmark[lm_idx]
                 cv2.circle(image, (int(lm.x * img_w), int(lm.y * img_h)), radius=2, color=(255, 0, 0), thickness=-1)
 
-        # 3. Time Windows Update (30s window) - ALWAYS RUN
+        # Time Window Updates 
         head_away_history.append((curr_time, is_head_away))
         eyes_away_history.append((curr_time, is_eyes_away))
         
+        # Remove elements outside the 30s window
         while head_away_history and curr_time - head_away_history[0][0] > 30:
             head_away_history.popleft()
         while eyes_away_history and curr_time - eyes_away_history[0][0] > 30:
             eyes_away_history.popleft()
             
+        # Calculate cumulative time
         cum_head_away = calc_cumulative_time(head_away_history)
         cum_eyes_away = calc_cumulative_time(eyes_away_history)
 
-        # 4. Continuous Event Trackers
+        # Continuous Event Trackers
         if is_head_away:
             head_forward_start = None
         else:
@@ -279,7 +296,7 @@ def main():
             # Only reset the timer if the head has been forward for at least 0.5 seconds
             if curr_time - head_forward_start >= 0.5:
                 last_head_forward_time = curr_time
-                
+               
         if is_eyes_away:
             eyes_forward_start = None
         else:
@@ -296,7 +313,7 @@ def main():
             if eyes_open_start is None:
                 eyes_open_start = curr_time
 
-        # 5. Distraction State Machine Logic
+        # Distraction State Machine Logic
         # Sleep
         if (curr_time - last_eyes_open_time) >= 7:
             state_sleep = True
@@ -341,7 +358,7 @@ def main():
         elif cum_eyes_away >= 10:
             state_short_lizard = True
 
-        # 6. Prioritize Displayed State
+        # Priority Displayed State
         if not is_face_detected:
             driver_state = "Face not detected"
         elif state_sleep:
@@ -359,14 +376,14 @@ def main():
         else:
             driver_state = "Focused on the road"
             
-        # 7. Compute HR (Update every 1 sec)
+        # Compute HR (Update every 1 sec)
         if is_face_detected and curr_time - last_hr_update > 1.0:
             if len(time_buffer) > 100:
                 est_fps = len(time_buffer) / (time_buffer[-1] - time_buffer[0])
                 current_hr = estimate_hr_rPPG(list(r_buffer), list(g_buffer), list(b_buffer), est_fps)
             last_hr_update = curr_time
 
-        # --- Render Overlays ---
+        # Render Overlays
         # Bottom Right: Driver State
         text_size = cv2.getTextSize(driver_state, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
         text_x = img_w - text_size[0] - 20
@@ -390,7 +407,8 @@ def main():
 
         if cv2.waitKey(5) & 0xFF == 27: # ESC
             break
-            
+
+    # Release resources
     cap.release()
     cv2.destroyAllWindows()
 
