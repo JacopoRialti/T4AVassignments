@@ -309,9 +309,11 @@ def main():
         if is_eyes_closed:
             eyes_open_start = None
         else:
-            last_eyes_open_time = curr_time
             if eyes_open_start is None:
                 eyes_open_start = curr_time
+            # Only reset the timer if the eyes have been open for at least 0.5 seconds
+            if curr_time - eyes_open_start >= 0.5:
+                last_eyes_open_time = curr_time
 
         # Distraction State Machine Logic
         # Sleep
